@@ -1,1 +1,243 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Game Ojan — Tap Gems</title>
+  <style>
+    :root{--bg1:#4e54c8;--bg2:#8f94fb;--card:#ffffff20;}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#fff;
+         background:linear-gradient(135deg,var(--bg1),var(--bg2));display:flex;flex-direction:column;min-height:100vh}
+    header{padding:18px;text-align:center}
+    h1{margin:6px 0;font-size:1.4rem}
+    p{margin:0 0 12px 0;opacity:0.95}
+    #hud{display:flex;gap:12px;align-items:center;justify-content:center;margin-bottom:8px}
+    .btn{background:#fff;color:var(--bg1);padding:10px 14px;border-radius:12px;text-decoration:none;font-weight:700}
+    #gameWrap{max-width:900px;margin:0 auto;padding:12px;width:100%}
+    canvas{display:block;width:100%;height:calc(100vh - 220px);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.3);touch-action:none}
+    #info{display:flex;justify-content:space-between;align-items:center;margin-top:10px;color:#fff}
+    #score { font-weight:700; font-size:1.1rem; }
+    #time { opacity:0.95; }
+    #overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .panel{background:rgba(255,255,255,0.06);backdrop-filter: blur(6px);padding:18px;border-radius:14px;min-width:260px;pointer-events:auto;text-align:center}
+    .hidden{display:none}
+    small{opacity:0.9}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎮 Game Ojan — Tap Gems</h1>
+    <p>Ketuk/gatap permata yang muncul untuk menambah skor. 30 detik — dapatkan skor tertinggi!</p>
+  </header>
 
+  <div id="gameWrap">
+    <div id="hud">
+      <a id="startBtn" class="btn" href="#">Start</a>
+      <a id="backBtn" class="btn" href="../">Kembali ke Situs</a>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="info">
+      <div id="score">Skor: 0</div>
+      <div id="time">Waktu: 30s</div>
+    </div>
+  </div>
+
+  <div id="overlay" aria-hidden="true">
+    <div id="menu" class="panel">
+      <h3>Tap Gems</h3>
+      <p>Ketuk permata untuk mendapat poin. Main selama 30 detik.</p>
+      <small>Sentuh layar (HP) atau klik (PC)</small>
+      <div style="margin-top:12px">
+        <a id="startBtn2" class="btn" href="#">Mulai Sekarang</a>
+      </div>
+    </div>
+
+    <div id="gameover" class="panel hidden">
+      <h3>Waktu Habis!</h3>
+      <p>Skor akhir: <span id="finalScore">0</span></p>
+      <div style="margin-top:12px">
+        <a id="restartBtn" class="btn" href="#">Main Lagi</a>
+      </div>
+      <div style="margin-top:8px">
+        <a class="btn" href="../">Kembali ke Situs</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const hudScore = document.getElementById('score');
+  const hudTime = document.getElementById('time');
+  const startBtn = document.getElementById('startBtn');
+  const startBtn2 = document.getElementById('startBtn2');
+  const restartBtn = document.getElementById('restartBtn');
+  const overlay = document.getElementById('overlay');
+  const menu = document.getElementById('menu');
+  const gameoverPanel = document.getElementById('gameover');
+  const finalScore = document.getElementById('finalScore');
+
+  let gems = [], score = 0, timeLeft = 30, running = false;
+  let lastTime = 0, spawnTimer = 0;
+
+  function resizeCanvas(){
+    // Use CSS size and device pixel ratio for sharpness
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(300, rect.width) * dpr;
+    canvas.height = Math.max(200, rect.height) * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+
+  function setToFullHeight(){
+    // ensure canvas has client size; useful on mobile
+    canvas.style.height = (window.innerHeight - 200) + 'px';
+    resizeCanvas();
+  }
+
+  window.addEventListener('resize', () => { setToFullHeight(); });
+  setToFullHeight();
+
+  function rand(min,max){ return Math.random()*(max-min)+min; }
+  function randColor(){
+    const palettes = [
+      ['#ff6b6b','#c43b3b'],
+      ['#ffd166','#f0a500'],
+      ['#6bf',' #0aa'],
+      ['#7cf','#2a9d8f'],
+      ['#f6a5ff','#c06b9a']
+    ];
+    return palettes[Math.floor(Math.random()*palettes.length)];
+  }
+
+  function spawnGem(){
+    const rect = canvas.getBoundingClientRect();
+    const r = rand(16,34);
+    const x = rand(r, rect.width - r);
+    const y = -r;
+    const vy = rand(60,200); // px per second
+    const cols = randColor();
+    gems.push({x,y,r,vy,cols});
+  }
+
+  function update(dt){
+    if(!running) return;
+    spawnTimer += dt;
+    if(spawnTimer > 0.6){ spawnGem(); spawnTimer = 0; }
+    for(let i=gems.length-1;i>=0;i--){
+      const g = gems[i];
+      g.y += g.vy * dt;
+      if(g.y - g.r > canvas.getBoundingClientRect().height){
+        gems.splice(i,1); // fall out
+      }
+    }
+    timeLeft -= dt;
+    if(timeLeft <= 0){ endGame(); }
+  }
+
+  function drawGem(g){
+    const {x,y,r,cols} = g;
+    const grad = ctx.createRadialGradient(x - r*0.25, y - r*0.3, r*0.1, x, y, r);
+    grad.addColorStop(0, '#fff');
+    grad.addColorStop(0.15, cols[0]);
+    grad.addColorStop(1, cols[1] || cols[0]);
+    ctx.beginPath();
+    ctx.fillStyle = grad;
+    ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fill();
+
+    // highlight
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = Math.max(1, r*0.08);
+    ctx.stroke();
+  }
+
+  function render(){
+    // clear
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    ctx.clearRect(0,0,w,h);
+
+    // background subtle
+    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    ctx.fillRect(0,0,w,h);
+
+    // draw gems
+    for(const g of gems) drawGem(g);
+
+    // HUD (score/time) are DOM, but we can optionally draw extras
+  }
+
+  function loop(now){
+    if(!lastTime) lastTime = now;
+    const dt = Math.min(0.05, (now - lastTime)/1000); // cap dt
+    lastTime = now;
+    update(dt);
+    render();
+    hudScore.textContent = 'Skor: ' + score;
+    hudTime.textContent = 'Waktu: ' + Math.max(0, Math.ceil(timeLeft)) + 's';
+    if(running) requestAnimationFrame(loop);
+  }
+
+  function startGame(){
+    // reset
+    gems = []; score = 0; timeLeft = 30; spawnTimer = 0;
+    running = true;
+    lastTime = 0;
+    overlay.style.pointerEvents = 'none';
+    menu.classList.add('hidden');
+    gameoverPanel.classList.add('hidden');
+    requestAnimationFrame(loop);
+  }
+
+  function endGame(){
+    running = false;
+    overlay.style.pointerEvents = 'auto';
+    gameoverPanel.classList.remove('hidden');
+    menu.classList.add('hidden');
+    finalScore.textContent = score;
+  }
+
+  function onPointer(e){
+    if(!running) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    // check from top gem (last)
+    for(let i=gems.length-1;i>=0;i--){
+      const g = gems[i];
+      const dx = g.x - x; const dy = g.y - y;
+      if(Math.hypot(dx,dy) <= g.r){
+        // hit
+        score += 1;
+        // small pop effect (remove)
+        gems.splice(i,1);
+        return;
+      }
+    }
+  }
+
+  // Event listeners
+  canvas.addEventListener('pointerdown', (e) => { onPointer(e); e.preventDefault(); });
+  startBtn.addEventListener('click', (e) => { e.preventDefault(); startGame(); });
+  startBtn2.addEventListener('click', (e) => { e.preventDefault(); startGame(); });
+  restartBtn.addEventListener('click', (e) => { e.preventDefault(); startGame(); });
+
+  // enable touch-action none for canvas (avoid scrolling while tapping)
+  canvas.style.touchAction = 'none';
+
+  // initial overlay
+  overlay.style.pointerEvents = 'auto';
+  menu.classList.remove('hidden');
+  gameoverPanel.classList.add('hidden');
+
+  // ensure canvas sizing when loaded
+  setTimeout(resizeCanvas, 50);
+})();
+</script>
+</body>
+</html>
